@@ -1,0 +1,45 @@
+{
+  "Settings": {
+    "Max_Workers": 2,
+    "STDIN_TIMEOUT": 5,
+    "Debug": true,
+    "Debug_Daemon": true,
+    "Debug_CLI": false,
+    "Daemon_Host": "localhost:61119",
+    "Daemon_TCP": "tcp",	//	default=tcp [tcp4|tcp6]
+    "Daemon_Socket": "", 	// TODO: '/tmp/auth.socket' or empty
+    "Daemon_Chmod": 600,	// TODO: 600, 660 or 666 for socket
+    "Auth_Mode": "json",	// json TODO: [mongo|mysql|pgsql|redis]
+    "Pass_Mode": "plain",	// [plain|bcrypt|sha256]
+    "USER_Len_Min": 4,		// defines minimum length of username
+    "PASS_Len_Min": 4,		// defines minimum length of password
+    "Logs_File": ""			// TODO: empty or /path/filename.log
+  },
+  "Json_Auth": {
+      "User_File": "user.json" // set your own filename
+  },
+  "Mongo_Auth": {
+      "Mongo_Host": "",
+      "Mongo_User": "",
+      "Mongo_Pass": "",
+      "Mongo_DB": ""
+  },
+  "Mysql_Auth": {
+      "Mysql_Host": "",
+      "Mysql_User": "",
+      "Mysql_Pass": "",
+      "Mysql_DB": ""
+  },
+  "Pgsql_Auth": {
+      "Pgsql_Host": "",
+      "Pgsql_User": "",
+      "Pgsql_Pass": "",
+      "Pgsql_DB": ""
+  },
+  "Redis_Auth": {
+      "Redis_Host": "",
+      "Redis_User": "",
+      "Redis_Pass": "",
+      "Redis_DB": ""
+  }
+}

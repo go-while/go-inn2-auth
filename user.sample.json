@@ -1,0 +1,23 @@
+{
+  "Users": [
+	{
+		"Username":	"testuser1",
+		"Password":	"testpass1",
+		"Expire":	1790539435,
+		"ClientIP": "127.0.0.1",
+		"Hostname": "localhost"
+	},
+	{
+		"Username":	"testuser2",
+		"Password":	"testpass2",
+		"Expire":	1790539435,
+		"Clientip": "127.0.0.2",
+		"Hostname": "nocalhost"
+	},
+	{
+		"Username":	"testuser3",
+		"Password":	"testpass3",
+		"Expire":	1690539435
+	}
+  ]
+}
