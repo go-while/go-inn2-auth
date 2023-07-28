@@ -16,7 +16,7 @@ package main
  * 		TEST: echo -en "ClientAuthname: testuser1\r\nClientPassword: testpass1\r\nClientHost: localhost\r\nClientIP: 127.0.0.1\r\nClientPort: 5678\r\nLocalIP: 1.2.3.4\r\nLocalPort: 1234\r\n.\r\n" | ./go-inn2-auth | hexdump -c
  * 	inn2.conf: ????
  *
-*/
+ */
 
 import (
 	"bufio"
@@ -39,9 +39,9 @@ import (
 )
 
 const (
-	LIMIT_REQUESTS int   = 16	// parallel requests
-	RELOAD_USER    int64 = 60	// reloads user.json
-	STDIN_SCAN_MAX int   = 7	// do not change! refers to 'external-auth' lines
+	LIMIT_REQUESTS int   = 16 // parallel requests
+	RELOAD_USER    int64 = 60 // reloads user.json
+	STDIN_SCAN_MAX int   = 7  // do not change! refers to 'external-auth' lines
 )
 
 type CFG struct {
@@ -125,20 +125,20 @@ var (
 	auth                AUTH_CACHE
 	done_daemons        chan struct{}
 	REQUEST_CHAN        chan INN2_STDIN
-	STDIN_TIMEOUT       int = 5		// default of inn2
-	LIMIT_REQUESTS_CHAN = make(chan struct{}, LIMIT_REQUESTS)
+	STDIN_TIMEOUT       int = 5 // default of inn2
+	LIMIT_REQUESTS_CHAN     = make(chan struct{}, LIMIT_REQUESTS)
 )
 
 /*
- *  LINES:
-	ClientAuthname: user\r\n
-	ClientPassword: pass\r\n
-	ClientHost: hostname\r\n
-	ClientIP: IP-address\r\n
-	ClientPort: port\r\n
-	LocalIP: IP-address\r\n
-	LocalPort: port\r\n
-	.\r\n
+  - LINES:
+    ClientAuthname: user\r\n
+    ClientPassword: pass\r\n
+    ClientHost: hostname\r\n
+    ClientIP: IP-address\r\n
+    ClientPort: port\r\n
+    LocalIP: IP-address\r\n
+    LocalPort: port\r\n
+    .\r\n
 */
 type INN2_STDIN struct {
 	ClientAuthname string
@@ -209,10 +209,10 @@ func main() {
 		REQUEST_CHAN = make(chan INN2_STDIN, maxworkers)
 		done_daemons = make(chan struct{}, maxworkers)
 		for wid := 1; wid <= maxworkers; wid++ {
-			go Daemon(DEBUG_DAEMON, wid, cfg, REQUEST_CHAN)
+			go Daemon(DEBUG_DAEMON, wid, cfg)
 			time.Sleep(time.Second / 1000)
 		}
-		go TCP(DEBUG_DAEMON, cfg, REQUEST_CHAN)
+		go TCP(DEBUG_DAEMON, cfg)
 	} // end if boot_daemon
 
 	// Setting up signal capturing
@@ -352,7 +352,7 @@ load_users2map:
 	return DEBUG, user_map, nil
 } // end func ReadUserJson
 
-func Daemon(DEBUG bool, wid int, cfg CFG, REQUEST_CHAN chan INN2_STDIN) {
+func Daemon(DEBUG bool, wid int, cfg CFG) {
 	if DEBUG {
 		log.Printf("BOOT: DAEMON %d", wid)
 	}
@@ -486,7 +486,7 @@ func AUTH(DEBUG bool, cfg CFG, auth_request INN2_STDIN) bool {
 	return false
 } // end func AUTH
 
-func TCP(DEBUG bool, cfg CFG, REQUEST_CHAN chan INN2_STDIN) {
+func TCP(DEBUG bool, cfg CFG) {
 	var conn net.Conn
 	var err error
 	listener_tcp, err := net.Listen(cfg.Settings.Daemon_TCP, cfg.Settings.Daemon_Host)
