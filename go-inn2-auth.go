@@ -223,26 +223,24 @@ forever:
 	for {
 		select {
 		case <-stop:
-			log.Printf("OS_SIGINT")
+			logf(DEBUG, "OS_SIGINT")
 			break forever
 		case <-timeout:
-			log.Printf("CLI_TIMEOUT")
+			logf(DEBUG, "CLI_TIMEOUT")
 			os.Exit(1)
 		}
 	}
 } // end func main
 
 func ReadStdin(DEBUG bool, cfg CFG) {
-	if DEBUG {
-		log.Printf("ReadStdin")
-	}
+	logf(DEBUG, "ReadStdin")
 	rdr := bufio.NewReader(os.Stdin)
 	var lines []string
 scanner:
 	for i := 1; i <= STDIN_SCAN_MAX; i++ {
 		switch line, err := rdr.ReadString('\n'); err {
 		case io.EOF:
-			log.Printf("ERROR Stdin io.EOF: read %d lines", i)
+			logf(DEBUG, "ERROR Stdin io.EOF: read %d lines", i)
 			os.Exit(1)
 		case nil:
 			// no error from stdin: clear CRLF
@@ -252,15 +250,9 @@ scanner:
 			if line[len(line)-1] == '\r' {
 				line = line[:len(line)-1]
 			}
-
-			if DEBUG {
-				fmt.Println(line)
-			}
-
+			logf(DEBUG, "ReadStdin: line='%s'", line)
 			if line == "." {
-				if DEBUG {
-					log.Printf("ReadStdin: DOT @ line: %d", i)
-				}
+				logf(DEBUG, "ReadStdin: DOT @ line: %d", i)
 				break scanner
 			}
 			lines = append(lines, line)
@@ -268,9 +260,7 @@ scanner:
 	} // end for scanner
 
 	if len(lines) < STDIN_SCAN_MAX {
-		if DEBUG {
-			log.Printf("ERROR ReadStdin lines=%d", len(lines))
-		}
+		logf(DEBUG, "ERROR ReadStdin lines=%d", len(lines))
 		os.Exit(1)
 	}
 
@@ -283,9 +273,8 @@ scanner:
 } // end func ReadStdin
 
 func ReadConfig(DEBUG bool, filename string) CFG {
-	if DEBUG {
-		log.Printf("ReadConfig: file='%s'", filename)
-	}
+	//logf(DEBUG, "ReadConfig: file='%s'", filename)
+	logf(DEBUG, "ReadConfig: file='%s'", filename)
 	file, err := ioutil.ReadFile(filename)
 	if err != nil {
 		log.Fatalf("%v", err)
@@ -307,25 +296,22 @@ func (ac *AUTH_CACHE) ReadUserJson(DEBUG bool, cfg CFG) (bool, map[string]USER_D
 
 	filehash := FILEHASH(cfg.Json_Auth.User_File)
 	if ac.hash == filehash {
-		if DEBUG {
-			log.Printf("IGNORE ReadUserJson hash == filehash")
-		}
+		logf(DEBUG, "IGNORE ReadUserJson hash == filehash")
 		ac.mux.RUnlock()
 		return DEBUG, nil, nil
 	}
 	ac.mux.RUnlock()
 
-	if DEBUG {
-		log.Printf("ReadUserJson: file='%s'", cfg.Json_Auth.User_File)
-	}
+	logf(DEBUG, "ReadUserJson: file='%s'", cfg.Json_Auth.User_File)
+
 	file, err := ioutil.ReadFile(cfg.Json_Auth.User_File)
 	if err != nil {
-		log.Printf("ERROR ReadUserJson err='%v'", err)
+		logf(DEBUG, "ERROR ReadUserJson err='%v'", err)
 		return DEBUG, nil, err
 	}
 	var json_users JSON_USERS
 	if err := json.Unmarshal(file, &json_users); err != nil {
-		log.Printf("ERROR ReadUserJson Unmarshal err='%v'", err)
+		logf(DEBUG, "ERROR ReadUserJson Unmarshal err='%v'", err)
 		return DEBUG, nil, err
 	}
 	now := UnixTimeSec()
@@ -333,17 +319,17 @@ func (ac *AUTH_CACHE) ReadUserJson(DEBUG bool, cfg CFG) (bool, map[string]USER_D
 load_users2map:
 	for i, usr := range json_users.Users {
 		if usr.Username == "" || usr.Password == "" {
-			log.Printf("ERROR JSON empty field i=%d: username|password", i)
+			logf(DEBUG, "ERROR JSON empty field i=%d: username|password", i)
 			continue load_users2map
 		}
 		if usr.Expire >= 0 && usr.Expire < now { // set to -1 to never expire user
 			since := now - usr.Expire
-			log.Printf("EXPIRED user='%s' expi=%d diff=%d", usr.Username, usr.Expire, since)
+			logf(DEBUG, "EXPIRED user='%s' expi=%d diff=%d", usr.Username, usr.Expire, since)
 			continue load_users2map
 		}
-		if DEBUG {
-			log.Printf("LOAD user='%s' pass='%s' expi=%d hostname='%s' clientip='%s'", usr.Username, usr.Password, usr.Expire, usr.Hostname, usr.ClientIP)
-		}
+
+		logf(DEBUG, "LOAD user='%s' pass='%s' expi=%d hostname='%s' clientip='%s'", usr.Username, usr.Password, usr.Expire, usr.Hostname, usr.ClientIP)
+
 		user_map[usr.Username] = USER_DATA{usr.Username, usr.Password, usr.Expire, usr.Hostname, usr.ClientIP}
 	}
 	ac.mux.Lock()
@@ -353,9 +339,7 @@ load_users2map:
 } // end func ReadUserJson
 
 func Daemon(DEBUG bool, wid int, cfg CFG) {
-	if DEBUG {
-		log.Printf("BOOT: DAEMON %d", wid)
-	}
+	logf(DEBUG, "BOOT: DAEMON %d", wid)
 	var reload <-chan time.Time
 	timeout := time.Duration(RELOAD_USER)
 	if wid == 1 { // only first worker may reload user data
@@ -368,21 +352,15 @@ daemon:
 			if !ok {
 				break daemon
 			}
-			if DEBUG {
-				log.Printf("DAEMON: got auth_request='%v'", auth_request)
-			}
+			logf(DEBUG, "DAEMON: got auth_request='%v'", auth_request)
 
 			if auth_request.ClientAuthname == "" || len(auth_request.ClientAuthname) < cfg.Settings.USER_Len_Min {
-				if DEBUG {
-					log.Printf("ERROR ClientAuthname len=%d", len(auth_request.ClientAuthname))
-				}
+				logf(DEBUG, "ERROR ClientAuthname len=%d", len(auth_request.ClientAuthname))
 				auth_request.Retchan <- "" // AUTH: DENIED short username
 				continue daemon
 			}
 			if auth_request.ClientPassword == "" || len(auth_request.ClientPassword) < cfg.Settings.PASS_Len_Min {
-				if DEBUG {
-					log.Printf("ERROR ClientPassword len=%d", len(auth_request.ClientPassword))
-				}
+				logf(DEBUG, "ERROR ClientPassword len=%d", len(auth_request.ClientPassword))
 				auth_request.Retchan <- "" // AUTH: DENIED short password
 				continue daemon
 			}
@@ -402,7 +380,7 @@ daemon:
 		} // end select
 	} // end for daemon
 
-	log.Printf("Daemon %d done", wid)
+	logf(DEBUG, "Daemon %d done", wid)
 	done_daemons <- struct{}{}
 } // end func Daemon
 
@@ -422,9 +400,7 @@ func AUTH(DEBUG bool, cfg CFG, auth_request INN2_STDIN) bool {
 		// is not cached
 		switch cfg.Settings.Auth_Mode {
 		case "json":
-			if DEBUG {
-				log.Printf("DENIED json: unknown user='%s' clientip='%s' hostname='%s'", auth_request.ClientAuthname, auth_request.ClientIP, auth_request.ClientHost)
-			}
+			logf(DEBUG, "DENIED json: unknown user='%s' clientip='%s' hostname='%s'", auth_request.ClientAuthname, auth_request.ClientIP, auth_request.ClientHost)
 			// user does not exist in user.json, maybe with next reload
 			return false
 		case "mongo":
@@ -436,7 +412,7 @@ func AUTH(DEBUG bool, cfg CFG, auth_request INN2_STDIN) bool {
 		case "redis":
 			// TODO: get user_data from redis && auth.Update_Userdata || return false
 		default:
-			log.Printf("ERROR AUTH: unknown Auth_Mode")
+			logf(DEBUG, "ERROR AUTH: unknown Auth_Mode")
 			return false
 		} // end switch cfg.Settings.Auth_Mode
 	}
@@ -444,25 +420,19 @@ func AUTH(DEBUG bool, cfg CFG, auth_request INN2_STDIN) bool {
 	now := UnixTimeSec()
 	if user_data.Expire >= 0 && user_data.Expire < now {
 		// user expired
-		if DEBUG {
-			log.Printf("AUTH: EXPIRED user=%s since=%d", user_data.Username, now-user_data.Expire)
-		}
+		logf(DEBUG, "AUTH: EXPIRED user=%s since=%d", user_data.Username, now-user_data.Expire)
 		return false
 	}
 
 	if user_data.ClientIP != "" && user_data.ClientIP != auth_request.ClientIP {
 		// check clientip failed
-		if DEBUG {
-			log.Printf("DENIED user='%s' clientip='%s'", user_data.Username, auth_request.ClientIP)
-		}
+		logf(DEBUG, "DENIED user='%s' clientip='%s'", user_data.Username, auth_request.ClientIP)
 		return false
 	}
 
 	if user_data.Hostname != "" && user_data.Hostname != auth_request.ClientHost {
 		// check hostname failed
-		if DEBUG {
-			log.Printf("DENIED user='%s' hostname='%s'", user_data.Username, auth_request.ClientHost)
-		}
+		logf(DEBUG, "DENIED user='%s' hostname='%s'", user_data.Username, auth_request.ClientHost)
 		return false
 	}
 
@@ -491,23 +461,23 @@ func TCP(DEBUG bool, cfg CFG) {
 	var err error
 	listener_tcp, err := net.Listen(cfg.Settings.Daemon_TCP, cfg.Settings.Daemon_Host)
 	if err != nil {
-		log.Printf("ERROR TCP err='%v'", err)
+		logf(DEBUG, "ERROR TCP err='%v'", err)
 		os.Exit(1)
 	}
 	defer listener_tcp.Close()
-	log.Printf("Listen TCP: %s", cfg.Settings.Daemon_Host)
+	logf(DEBUG, "Listen TCP: %s", cfg.Settings.Daemon_Host)
 	var id uint64
 listener:
 	for {
 		if conn, err = listener_tcp.Accept(); err != nil {
-			log.Printf("ERROR TCP err='%v'", err)
+			logf(DEBUG, "ERROR TCP err='%v'", err)
 			break listener
 		}
 		id++
 		go handleRequest(DEBUG, id, conn)
 	} // end for listener_tcp.Accept()
 
-	log.Printf("TCP: closed addr=%s", cfg.Settings.Daemon_Host)
+	logf(DEBUG, "TCP: closed addr=%s", cfg.Settings.Daemon_Host)
 } // end func TCP
 
 func lock_LIMIT_REQUESTS() {
@@ -524,29 +494,25 @@ func handleRequest(DEBUG bool, id uint64, conn net.Conn) {
 	defer return_LIMIT_REQUESTS()
 	defer conn.Close()
 
-	log.Printf("handleRequest id=%d", id)
+	logf(DEBUG, "handleRequest id=%d", id)
 
 	tp := textproto.NewConn(conn)
 	if lines, err := tp.ReadDotLines(); err != nil {
-		log.Printf("Error handleRequest ReadDotLines err='%v'", err)
+		logf(DEBUG, "Error handleRequest ReadDotLines err='%v'", err)
 		return
 	} else {
 		if username := parse_request(DEBUG, lines); username != "" {
-			if DEBUG {
-				log.Printf("handleRequest: 200 %s", username)
-			}
+			logf(DEBUG, "handleRequest: 200 %s", username)
 			tp.Cmd("200 %s", username)
 			return
 		}
-		if DEBUG {
-			log.Printf("handleRequest: 400 DENIED")
-		}
+		logf(DEBUG, "handleRequest: 400 DENIED")
 		tp.Cmd("400 DENIED")
 	}
 } // end func handleRequest
 
 func parse_request(DEBUG bool, lines []string) string {
-	log.Printf("parse_request lines=%d", len(lines))
+	logf(DEBUG, "parse_request lines=%d", len(lines))
 	var auth_request INN2_STDIN
 	e := 0
 	for _, line := range lines {
@@ -575,9 +541,7 @@ func parse_request(DEBUG bool, lines []string) string {
 	// send the received auth_request from TCP to REQUEST_CHAN
 	REQUEST_CHAN <- auth_request
 	username := <-auth_request.Retchan
-	if DEBUG {
-		log.Printf("parse_request: Retchan got username='%s'", username)
-	}
+	logf(DEBUG, "parse_request: Retchan got username='%s'", username)
 	return username
 } // end func parse_request
 
@@ -585,12 +549,10 @@ func CLI(DEBUG bool, cfg CFG, lines []string) string {
 	var conn net.Conn
 	var err error
 	if conn, err = net.Dial(cfg.Settings.Daemon_TCP, cfg.Settings.Daemon_Host); err != nil {
-		log.Printf("ERROR CLI Dial err='%v'", err)
+		logf(DEBUG, "ERROR CLI Dial err='%v'", err)
 		return ""
 	}
-	if DEBUG {
-		log.Printf("CLI lines=%d", len(lines))
-	}
+	logf(DEBUG, "CLI lines=%d", len(lines))
 	srvtp := textproto.NewConn(conn)
 	dw := srvtp.DotWriter()
 	buf := bufio.NewWriter(dw)
@@ -603,14 +565,10 @@ func CLI(DEBUG bool, cfg CFG, lines []string) string {
 		return ""
 	}
 	if code, username, err := srvtp.ReadCodeLine(200); err == nil {
-		if DEBUG {
-			log.Printf("CLI code=%d msg=%s err='%v'", code, username, err)
-		}
+		logf(DEBUG, "CLI code=%d msg=%s err='%v'", code, username, err)
 		return username
 	} else {
-		if DEBUG {
-			log.Printf("ERROR CLI code=%d err='%v'", code, err)
-		}
+		logf(DEBUG, "ERROR CLI code=%d err='%v'", code, err)
 	}
 	return ""
 } // end func CLI
@@ -625,29 +583,21 @@ func (ac *AUTH_CACHE) Make_AUTH_CACHE() {
 
 func (ac *AUTH_CACHE) Update_Cache(DEBUG bool, newmap map[string]USER_DATA, err error) bool {
 	if err != nil {
-		if DEBUG {
-			log.Printf("ERROR Update_Cache caller err='%v'", err)
-		}
+		logf(DEBUG, "ERROR Update_Cache caller err='%v'", err)
 		return false
 	}
 	if newmap == nil {
-		if DEBUG {
-			log.Printf("IGNORE Update_Cache newmap=nil")
-		}
+		logf(DEBUG, "IGNORE Update_Cache newmap=nil")
 		return false
 	}
 	now := UnixTimeSec()
 	ac.mux.Lock()
 	if ac.last > now-RELOAD_USER {
-		if DEBUG {
-			log.Printf("IGNORE Update_Cache not allowed")
-		}
+		logf(DEBUG, "IGNORE Update_Cache not allowed")
 		ac.mux.Unlock()
 		return false
 	}
-	if DEBUG {
-		log.Printf("Update_Cache OK")
-	}
+	logf(DEBUG, "Update_Cache OK")
 	ac.last, ac.data = now, newmap
 	ac.mux.Unlock()
 	return true
@@ -700,3 +650,9 @@ func FILEHASH(file_path string) string {
 func UnixTimeSec() int64 {
 	return time.Now().UnixNano() / 1e9
 } // end func UnixTimeSec
+
+func logf(DEBUG bool, format string, a ...any) {
+	if DEBUG {
+		log.Printf(format, a...)
+	}
+} // end logf
