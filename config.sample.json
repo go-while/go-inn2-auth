@@ -13,8 +13,12 @@
     "Pass_Mode": "plain",	// [plain|bcrypt|sha256]
     "USER_Len_Min": 4,		// defines minimum length of username
     "PASS_Len_Min": 4,		// defines minimum length of password
-    "Logs_File": ""			// TODO: empty or /path/filename.log
-  },
+    "Logs_File": "/path/filename.log",	// TODO: logs to file
+    // sudo cp /etc/lets-encrypt/live/www.domain.com/*.pem /var/lib/news/
+    // sudo chown news:news /var/lib/news/*.pem
+    "SSL_CRT": "/var/lib/news/fullchain.pem",	//	ssl certificate
+    "SSL_KEY": "/var/lib/news/privkey.pem",	//	ssl private-key
+  }
   "Json_Auth": {
       "User_File": "user.json" // set your own filename
   },

@@ -12,8 +12,8 @@ package main
  * and the resolvers are installed to pathbin/auth/resolv.
  *
  *
- * 		usage: ./go-inn2-auth -daemon=true
- * 		TEST: echo -en "ClientAuthname: testuser1\r\nClientPassword: testpass1\r\nClientHost: localhost\r\nClientIP: 127.0.0.1\r\nClientPort: 5678\r\nLocalIP: 1.2.3.4\r\nLocalPort: 1234\r\n.\r\n" | ./go-inn2-auth | hexdump -c
+ * 	usage: ./go-inn2-auth -daemon=true
+ * 	TEST: echo -en "ClientAuthname: testuser1\r\nClientPassword: testpass1\r\nClientHost: localhost\r\nClientIP: 127.0.0.1\r\nClientPort: 5678\r\nLocalIP: 1.2.3.4\r\nLocalPort: 1234\r\n.\r\n" | ./go-inn2-auth | hexdump -c
  * 	inn2.conf: ????
  *
  */
@@ -21,6 +21,7 @@ package main
 import (
 	"bufio"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -47,9 +48,10 @@ const (
 type CFG struct {
 	Settings   SETTINGS
 	Json_Auth  JSON_AUTH
-	Mysql_Auth MYSQL_AUTH
-	Pgsql_Auth PGSQL_AUTH
-	Redis_Auth REDIS_AUTH
+	Mongo_Auth MONGO_AUTH // TODO
+	Mysql_Auth MYSQL_AUTH // TODO
+	Pgsql_Auth PGSQL_AUTH // TODO
+	Redis_Auth REDIS_AUTH // TODO
 } // end CFG
 
 type SETTINGS struct {
@@ -67,6 +69,8 @@ type SETTINGS struct {
 	USER_Len_Min  int    `json:"USER_Len_Min"`
 	PASS_Len_Min  int    `json:"PASS_Len_Min"`
 	Logs_File     string `json:"Logs_File"`
+	SSL_CRT       string `json:"SSL_CRT"`
+	SSL_KEY       string `json:"SSL_KEY"`
 } // end SETTINGS
 
 type JSON_AUTH struct {
@@ -83,6 +87,13 @@ type JSON_USER struct {
 	Expire   int64  `json:"Expire"`
 	Hostname string `json:"Hostname"`
 	ClientIP string `json:"ClientIP"`
+}
+
+type MONGO_AUTH struct {
+	Mongo_User string `json:"Mongo_User"`
+	Mongo_Pass string `json:"Mongo_Pass"`
+	Mongo_Host string `json:"Mongo_Host"`
+	Mongo_DB   string `json:"Mongo_DB"`
 }
 
 type MYSQL_AUTH struct {
@@ -122,8 +133,8 @@ type AUTH_CACHE struct {
 }
 
 var (
-	auth                AUTH_CACHE
-	done_daemons        chan struct{}
+	auth AUTH_CACHE
+	//done_daemons        chan struct{}
 	REQUEST_CHAN        chan INN2_STDIN
 	STDIN_TIMEOUT       int = 5 // default of inn2
 	LIMIT_REQUESTS_CHAN     = make(chan struct{}, LIMIT_REQUESTS)
@@ -185,10 +196,13 @@ func main() {
 	DEBUG = cfg.Settings.Debug
 	DEBUG_CLI = cfg.Settings.Debug_CLI
 	DEBUG_DAEMON = cfg.Settings.Debug_Daemon
-
+	use_ssl := false
+	if cfg.Settings.SSL_CRT != "" && cfg.Settings.SSL_KEY != "" {
+		use_ssl = true
+	}
 	var timeout <-chan time.Time
 	if !boot_daemon {
-		go ReadStdin(DEBUG_CLI, cfg)
+		go ReadStdin(DEBUG_CLI, cfg, use_ssl)
 		timeout = time.After(time.Duration(cfg.Settings.STDIN_TIMEOUT) * time.Second)
 	} else {
 		auth.Make_AUTH_CACHE()
@@ -207,12 +221,16 @@ func main() {
 			log.Fatal("ERROR main: unknown Auth_Mode")
 		} // end switch
 		REQUEST_CHAN = make(chan INN2_STDIN, maxworkers)
-		done_daemons = make(chan struct{}, maxworkers)
+		//done_daemons = make(chan struct{}, maxworkers)
 		for wid := 1; wid <= maxworkers; wid++ {
 			go Daemon(DEBUG_DAEMON, wid, cfg)
 			time.Sleep(time.Second / 1000)
 		}
-		go TCP(DEBUG_DAEMON, cfg)
+		if use_ssl {
+			go SSL(DEBUG_DAEMON, cfg)
+		} else {
+			go TCP(DEBUG_DAEMON, cfg)
+		}
 	} // end if boot_daemon
 
 	// Setting up signal capturing
@@ -232,7 +250,7 @@ forever:
 	os.Exit(1)
 } // end func main
 
-func ReadStdin(DEBUG bool, cfg CFG) {
+func ReadStdin(DEBUG bool, cfg CFG, use_ssl bool) {
 	logf(DEBUG, "ReadStdin")
 	rdr := bufio.NewReader(os.Stdin)
 	var lines []string
@@ -264,7 +282,7 @@ scanner:
 		os.Exit(1)
 	}
 
-	if username := CLI(DEBUG, cfg, lines); username != "" {
+	if username := CLI(DEBUG, cfg, lines, use_ssl); username != "" {
 		line := fmt.Sprintf("User:%s\r\n", username)
 		fmt.Print(line)
 		os.Exit(0)
@@ -272,70 +290,46 @@ scanner:
 	os.Exit(1)
 } // end func ReadStdin
 
-func ReadConfig(DEBUG bool, filename string) CFG {
-	logf(DEBUG, "ReadConfig: file='%s'", filename)
-	file, err := ioutil.ReadFile(filename)
-	if err != nil {
-		log.Fatalf("%v", err)
-	}
-	var cfg CFG
-	err = json.Unmarshal(file, &cfg)
-	if err != nil {
-		log.Fatalf("%v", err)
-	}
-	return cfg
-} // end func ReadConfig
+func CLI(DEBUG bool, cfg CFG, lines []string, use_ssl bool) string {
+	logf(DEBUG, "CLI lines=%d", len(lines))
 
-func (ac *AUTH_CACHE) ReadUserJson(DEBUG bool, cfg CFG) (bool, map[string]USER_DATA, error) {
-	ac.mux.RLock()
-	if ac.last > UnixTimeSec()-RELOAD_USER {
-		ac.mux.RUnlock()
-		return DEBUG, nil, nil
-	}
+	var conn net.Conn
+	var err error
 
-	filehash := FILEHASH(cfg.Json_Auth.User_File)
-	if ac.hash == filehash {
-		//logf(DEBUG, "IGNORE ReadUserJson hash == filehash")
-		ac.mux.RUnlock()
-		return DEBUG, nil, nil
-	}
-	ac.mux.RUnlock()
-
-	logf(DEBUG, "ReadUserJson: file='%s'", cfg.Json_Auth.User_File)
-
-	file, err := ioutil.ReadFile(cfg.Json_Auth.User_File)
-	if err != nil {
-		log.Printf("ERROR ReadUserJson err='%v'", err)
-		return DEBUG, nil, err
-	}
-	var json_users JSON_USERS
-	if err := json.Unmarshal(file, &json_users); err != nil {
-		log.Printf("ERROR ReadUserJson Unmarshal err='%v'", err)
-		return DEBUG, nil, err
-	}
-	now := UnixTimeSec()
-	user_map := make(map[string]USER_DATA)
-load_users2map:
-	for i, usr := range json_users.Users {
-		if usr.Username == "" || usr.Password == "" {
-			log.Printf("ERROR JSON empty field i=%d: username|password", i)
-			continue load_users2map
+	if !use_ssl {
+		if conn, err = net.Dial(cfg.Settings.Daemon_TCP, cfg.Settings.Daemon_Host); err != nil {
+			log.Printf("ERROR CLI net.Dial err='%v'", err)
+			return ""
 		}
-		if usr.Expire >= 0 && usr.Expire < now { // set to -1 to never expire user
-			since := now - usr.Expire
-			log.Printf("EXPIRED user='%s' expi=%d diff=%d", usr.Username, usr.Expire, since)
-			continue load_users2map
+	} else {
+		ssl_conf := &tls.Config{
+			InsecureSkipVerify: false,
 		}
-
-		logf(DEBUG, "LOAD user='%s' pass='%s' expi=%d hostname='%s' clientip='%s'", usr.Username, usr.Password, usr.Expire, usr.Hostname, usr.ClientIP)
-
-		user_map[usr.Username] = USER_DATA{usr.Username, usr.Password, usr.Expire, usr.Hostname, usr.ClientIP}
+		if conn, err = tls.Dial(cfg.Settings.Daemon_TCP, cfg.Settings.Daemon_Host, ssl_conf); err != nil {
+			log.Printf("ERROR CLI tls.Dial err='%v'", err)
+			return ""
+		}
 	}
-	ac.mux.Lock()
-	ac.hash = filehash
-	ac.mux.Unlock()
-	return DEBUG, user_map, nil
-} // end func ReadUserJson
+
+	srvtp := textproto.NewConn(conn)
+	dw := srvtp.DotWriter()
+	buf := bufio.NewWriter(dw)
+	for _, line := range lines {
+		buf.WriteString(line + "\r\n")
+	}
+	buf.Flush()
+	err = dw.Close()
+	if err != nil {
+		return ""
+	}
+	if code, username, err := srvtp.ReadCodeLine(200); err == nil {
+		logf(DEBUG, "CLI code=%d msg=%s", code, username) // AUTH OK
+		return username
+	} else {
+		logf(DEBUG, "ERROR CLI code=%d err='%v'", code, err) // AUTH FAIL
+	}
+	return ""
+} // end func CLI
 
 func Daemon(DEBUG bool, wid int, cfg CFG) {
 	logf(DEBUG, "BOOT: DAEMON %d", wid)
@@ -380,7 +374,7 @@ daemon:
 	} // end for daemon
 
 	logf(DEBUG, "Daemon %d done", wid)
-	done_daemons <- struct{}{}
+	//done_daemons <- struct{}{}
 } // end func Daemon
 
 func AUTH(DEBUG bool, cfg CFG, auth_request INN2_STDIN) bool {
@@ -455,6 +449,39 @@ func AUTH(DEBUG bool, cfg CFG, auth_request INN2_STDIN) bool {
 	return false
 } // end func AUTH
 
+func SSL(DEBUG bool, cfg CFG) {
+	ssl, err := tls.LoadX509KeyPair(cfg.Settings.SSL_CRT, cfg.Settings.SSL_KEY)
+	if err != nil {
+		log.Printf("ERROR tls.LoadX509KeyPair err='%v'", err)
+		os.Exit(1)
+	}
+	ssl_conf := &tls.Config{
+		Certificates: []tls.Certificate{ssl},
+		//MinVersion: tls.VersionTLS12,
+		//MaxVersion: tls.VersionTLS13,
+	}
+	listener_ssl, err := tls.Listen(cfg.Settings.Daemon_TCP, cfg.Settings.Daemon_Host, ssl_conf)
+	if err != nil {
+		log.Printf("ERROR SSL err='%v'", err)
+		return
+	}
+	defer listener_ssl.Close()
+	log.Printf("Listen SSL: %s", cfg.Settings.Daemon_Host)
+	var id uint64
+listener:
+	for {
+		conn, err := listener_ssl.Accept()
+		if err != nil {
+			log.Printf("ERROR listener_ssl err='%v'", err)
+			time.Sleep(time.Second * 9)
+			continue listener
+		}
+		id++
+		go handleRequest(DEBUG, id, conn)
+	} // end for listener_ssl
+	//logf(DEBUG, "SSL listener_ssl closed %s", cfg.Settings.Daemon_Host)
+} // end func SSL
+
 func TCP(DEBUG bool, cfg CFG) {
 	var conn net.Conn
 	var err error
@@ -464,19 +491,19 @@ func TCP(DEBUG bool, cfg CFG) {
 		os.Exit(1)
 	}
 	defer listener_tcp.Close()
-	logf(DEBUG, "Listen TCP: %s", cfg.Settings.Daemon_Host)
+	log.Printf("Listen TCP: %s", cfg.Settings.Daemon_Host)
 	var id uint64
 listener:
 	for {
 		if conn, err = listener_tcp.Accept(); err != nil {
-			log.Printf("ERROR TCP err='%v'", err)
-			break listener
+			log.Printf("ERROR listener_tcp err='%v'", err)
+			time.Sleep(time.Second * 9)
+			continue listener
 		}
 		id++
 		go handleRequest(DEBUG, id, conn)
-	} // end for listener_tcp.Accept()
-
-	logf(DEBUG, "TCP: closed addr=%s", cfg.Settings.Daemon_Host)
+	} // end for listener_tcp
+	//logf(DEBUG, "TCP listener_tcp closed %s", cfg.Settings.Daemon_Host)
 } // end func TCP
 
 func lock_LIMIT_REQUESTS() {
@@ -489,18 +516,17 @@ func return_LIMIT_REQUESTS() {
 }
 
 func handleRequest(DEBUG bool, id uint64, conn net.Conn) {
+	start := time.Now().UnixNano()
 	lock_LIMIT_REQUESTS()
 	defer return_LIMIT_REQUESTS()
 	defer conn.Close()
-
-	logf(DEBUG, "handleRequest id=%d", id)
-
+	logf(DEBUG, "handleRequest id=%d waited=(%d ns)", id, time.Now().UnixNano()-start)
 	tp := textproto.NewConn(conn)
 	if lines, err := tp.ReadDotLines(); err != nil {
 		logf(DEBUG, "ERROR handleRequest ReadDotLines err='%v'", err)
 		return
 	} else {
-		if username := parse_request(DEBUG, lines); username != "" {
+		if username := parseRequest(DEBUG, lines); username != "" {
 			logf(DEBUG, "handleRequest: 200 %s", username)
 			tp.Cmd("200 %s", username)
 			return
@@ -510,8 +536,8 @@ func handleRequest(DEBUG bool, id uint64, conn net.Conn) {
 	}
 } // end func handleRequest
 
-func parse_request(DEBUG bool, lines []string) string {
-	logf(DEBUG, "parse_request lines=%d", len(lines))
+func parseRequest(DEBUG bool, lines []string) string {
+	logf(DEBUG, "parseRequest lines=%d", len(lines))
 	var auth_request INN2_STDIN
 	e := 0
 	for _, line := range lines {
@@ -540,37 +566,23 @@ func parse_request(DEBUG bool, lines []string) string {
 	// send the received auth_request from TCP to REQUEST_CHAN
 	REQUEST_CHAN <- auth_request
 	username := <-auth_request.Retchan
-	logf(DEBUG, "parse_request: Retchan got username='%s'", username)
+	logf(DEBUG, "parseRequest: Retchan got username='%s'", username)
 	return username
-} // end func parse_request
+} // end func parseRequest
 
-func CLI(DEBUG bool, cfg CFG, lines []string) string {
-	var conn net.Conn
-	var err error
-	if conn, err = net.Dial(cfg.Settings.Daemon_TCP, cfg.Settings.Daemon_Host); err != nil {
-		log.Printf("ERROR CLI Dial err='%v'", err)
-		return ""
-	}
-	logf(DEBUG, "CLI lines=%d", len(lines))
-	srvtp := textproto.NewConn(conn)
-	dw := srvtp.DotWriter()
-	buf := bufio.NewWriter(dw)
-	for _, line := range lines {
-		buf.WriteString(line + "\r\n")
-	}
-	buf.Flush()
-	err = dw.Close()
+func ReadConfig(DEBUG bool, filename string) CFG {
+	logf(DEBUG, "ReadConfig: file='%s'", filename)
+	file, err := ioutil.ReadFile(filename)
 	if err != nil {
-		return ""
+		log.Fatalf("%v", err)
 	}
-	if code, username, err := srvtp.ReadCodeLine(200); err == nil {
-		logf(DEBUG, "CLI code=%d msg=%s", code, username) // AUTH OK
-		return username
-	} else {
-		logf(DEBUG, "ERROR CLI code=%d err='%v'", code, err) // AUTH FAIL
+	var cfg CFG
+	err = json.Unmarshal(file, &cfg)
+	if err != nil {
+		log.Fatalf("%v", err)
 	}
-	return ""
-} // end func CLI
+	return cfg
+} // end func ReadConfig
 
 func (ac *AUTH_CACHE) Make_AUTH_CACHE() {
 	ac.mux.Lock()
@@ -617,6 +629,57 @@ func (ac *AUTH_CACHE) Get_Cached_Userdata(user string) USER_DATA {
 	ac.mux.RUnlock()
 	return retval
 } // end func auth.Get_Cached_Userdata
+
+func (ac *AUTH_CACHE) ReadUserJson(DEBUG bool, cfg CFG) (bool, map[string]USER_DATA, error) {
+	ac.mux.RLock()
+	if ac.last > UnixTimeSec()-RELOAD_USER {
+		ac.mux.RUnlock()
+		return DEBUG, nil, nil
+	}
+
+	filehash := FILEHASH(cfg.Json_Auth.User_File)
+	if ac.hash == filehash {
+		//logf(DEBUG, "IGNORE ReadUserJson hash == filehash")
+		ac.mux.RUnlock()
+		return DEBUG, nil, nil
+	}
+	ac.mux.RUnlock()
+
+	logf(DEBUG, "ReadUserJson: file='%s'", cfg.Json_Auth.User_File)
+
+	file, err := ioutil.ReadFile(cfg.Json_Auth.User_File)
+	if err != nil {
+		log.Printf("ERROR ReadUserJson err='%v'", err)
+		return DEBUG, nil, err
+	}
+	var json_users JSON_USERS
+	if err := json.Unmarshal(file, &json_users); err != nil {
+		log.Printf("ERROR ReadUserJson Unmarshal err='%v'", err)
+		return DEBUG, nil, err
+	}
+	now := UnixTimeSec()
+	user_map := make(map[string]USER_DATA)
+load_users2map:
+	for i, usr := range json_users.Users {
+		if usr.Username == "" || usr.Password == "" {
+			log.Printf("ERROR JSON empty field i=%d: username|password", i)
+			continue load_users2map
+		}
+		if usr.Expire >= 0 && usr.Expire < now { // set to -1 to never expire user
+			since := now - usr.Expire
+			log.Printf("EXPIRED user='%s' expi=%d diff=%d", usr.Username, usr.Expire, since)
+			continue load_users2map
+		}
+
+		logf(DEBUG, "LOAD user='%s' pass='%s' expi=%d hostname='%s' clientip='%s'", usr.Username, usr.Password, usr.Expire, usr.Hostname, usr.ClientIP)
+
+		user_map[usr.Username] = USER_DATA{usr.Username, usr.Password, usr.Expire, usr.Hostname, usr.ClientIP}
+	}
+	ac.mux.Lock()
+	ac.hash = filehash
+	ac.mux.Unlock()
+	return DEBUG, user_map, nil
+} // end func ReadUserJson
 
 func SHA256(password string) string {
 	hash := sha256.Sum256([]byte(password))
