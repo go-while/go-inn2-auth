@@ -1,6 +1,8 @@
 #!/bin/bash
 PATH="$PATH:/usr/local/go/bin"
 export GOPATH=$(pwd)
+go vet go-inn2-auth.go || exit 1
+go fmt go-inn2-auth.go
 go build go-inn2-auth.go
 RET=$?
 echo $(date)
