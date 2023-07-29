@@ -183,8 +183,8 @@ func main() {
 		maxworkers = cfg.Settings.Max_Workers
 	}
 	DEBUG = cfg.Settings.Debug
-	DEBUG_DAEMON = cfg.Settings.Debug_Daemon
 	DEBUG_CLI = cfg.Settings.Debug_CLI
+	DEBUG_DAEMON = cfg.Settings.Debug_Daemon
 
 	var timeout <-chan time.Time
 	if !boot_daemon {
@@ -223,13 +223,13 @@ forever:
 	for {
 		select {
 		case <-stop:
-			logf(DEBUG, "OS_SIGINT")
+			log.Printf("OS_SIGINT")
 			break forever
 		case <-timeout:
-			logf(DEBUG, "CLI_TIMEOUT")
-			os.Exit(1)
+			log.Printf("CLI_TIMEOUT")
 		}
 	}
+	os.Exit(1)
 } // end func main
 
 func ReadStdin(DEBUG bool, cfg CFG) {
@@ -240,8 +240,8 @@ scanner:
 	for i := 1; i <= STDIN_SCAN_MAX; i++ {
 		switch line, err := rdr.ReadString('\n'); err {
 		case io.EOF:
-			logf(DEBUG, "ERROR Stdin io.EOF: read %d lines", i)
-			os.Exit(1)
+			log.Printf("WARN Stdin io.EOF: read %d lines", i)
+			break scanner
 		case nil:
 			// no error from stdin: clear CRLF
 			if line[len(line)-1] == '\n' {
@@ -260,7 +260,7 @@ scanner:
 	} // end for scanner
 
 	if len(lines) < STDIN_SCAN_MAX {
-		logf(DEBUG, "ERROR ReadStdin lines=%d", len(lines))
+		log.Printf("ERROR ReadStdin lines=%d", len(lines))
 		os.Exit(1)
 	}
 
@@ -273,7 +273,6 @@ scanner:
 } // end func ReadStdin
 
 func ReadConfig(DEBUG bool, filename string) CFG {
-	//logf(DEBUG, "ReadConfig: file='%s'", filename)
 	logf(DEBUG, "ReadConfig: file='%s'", filename)
 	file, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -296,7 +295,7 @@ func (ac *AUTH_CACHE) ReadUserJson(DEBUG bool, cfg CFG) (bool, map[string]USER_D
 
 	filehash := FILEHASH(cfg.Json_Auth.User_File)
 	if ac.hash == filehash {
-		logf(DEBUG, "IGNORE ReadUserJson hash == filehash")
+		//logf(DEBUG, "IGNORE ReadUserJson hash == filehash")
 		ac.mux.RUnlock()
 		return DEBUG, nil, nil
 	}
@@ -306,12 +305,12 @@ func (ac *AUTH_CACHE) ReadUserJson(DEBUG bool, cfg CFG) (bool, map[string]USER_D
 
 	file, err := ioutil.ReadFile(cfg.Json_Auth.User_File)
 	if err != nil {
-		logf(DEBUG, "ERROR ReadUserJson err='%v'", err)
+		log.Printf("ERROR ReadUserJson err='%v'", err)
 		return DEBUG, nil, err
 	}
 	var json_users JSON_USERS
 	if err := json.Unmarshal(file, &json_users); err != nil {
-		logf(DEBUG, "ERROR ReadUserJson Unmarshal err='%v'", err)
+		log.Printf("ERROR ReadUserJson Unmarshal err='%v'", err)
 		return DEBUG, nil, err
 	}
 	now := UnixTimeSec()
@@ -319,12 +318,12 @@ func (ac *AUTH_CACHE) ReadUserJson(DEBUG bool, cfg CFG) (bool, map[string]USER_D
 load_users2map:
 	for i, usr := range json_users.Users {
 		if usr.Username == "" || usr.Password == "" {
-			logf(DEBUG, "ERROR JSON empty field i=%d: username|password", i)
+			log.Printf("ERROR JSON empty field i=%d: username|password", i)
 			continue load_users2map
 		}
 		if usr.Expire >= 0 && usr.Expire < now { // set to -1 to never expire user
 			since := now - usr.Expire
-			logf(DEBUG, "EXPIRED user='%s' expi=%d diff=%d", usr.Username, usr.Expire, since)
+			log.Printf("EXPIRED user='%s' expi=%d diff=%d", usr.Username, usr.Expire, since)
 			continue load_users2map
 		}
 
@@ -461,7 +460,7 @@ func TCP(DEBUG bool, cfg CFG) {
 	var err error
 	listener_tcp, err := net.Listen(cfg.Settings.Daemon_TCP, cfg.Settings.Daemon_Host)
 	if err != nil {
-		logf(DEBUG, "ERROR TCP err='%v'", err)
+		log.Printf("ERROR TCP err='%v'", err)
 		os.Exit(1)
 	}
 	defer listener_tcp.Close()
@@ -470,7 +469,7 @@ func TCP(DEBUG bool, cfg CFG) {
 listener:
 	for {
 		if conn, err = listener_tcp.Accept(); err != nil {
-			logf(DEBUG, "ERROR TCP err='%v'", err)
+			log.Printf("ERROR TCP err='%v'", err)
 			break listener
 		}
 		id++
@@ -498,7 +497,7 @@ func handleRequest(DEBUG bool, id uint64, conn net.Conn) {
 
 	tp := textproto.NewConn(conn)
 	if lines, err := tp.ReadDotLines(); err != nil {
-		logf(DEBUG, "Error handleRequest ReadDotLines err='%v'", err)
+		logf(DEBUG, "ERROR handleRequest ReadDotLines err='%v'", err)
 		return
 	} else {
 		if username := parse_request(DEBUG, lines); username != "" {
@@ -549,7 +548,7 @@ func CLI(DEBUG bool, cfg CFG, lines []string) string {
 	var conn net.Conn
 	var err error
 	if conn, err = net.Dial(cfg.Settings.Daemon_TCP, cfg.Settings.Daemon_Host); err != nil {
-		logf(DEBUG, "ERROR CLI Dial err='%v'", err)
+		log.Printf("ERROR CLI Dial err='%v'", err)
 		return ""
 	}
 	logf(DEBUG, "CLI lines=%d", len(lines))
@@ -565,10 +564,10 @@ func CLI(DEBUG bool, cfg CFG, lines []string) string {
 		return ""
 	}
 	if code, username, err := srvtp.ReadCodeLine(200); err == nil {
-		logf(DEBUG, "CLI code=%d msg=%s err='%v'", code, username, err)
+		logf(DEBUG, "CLI code=%d msg=%s", code, username) // AUTH OK
 		return username
 	} else {
-		logf(DEBUG, "ERROR CLI code=%d err='%v'", code, err)
+		logf(DEBUG, "ERROR CLI code=%d err='%v'", code, err) // AUTH FAIL
 	}
 	return ""
 } // end func CLI
@@ -583,11 +582,11 @@ func (ac *AUTH_CACHE) Make_AUTH_CACHE() {
 
 func (ac *AUTH_CACHE) Update_Cache(DEBUG bool, newmap map[string]USER_DATA, err error) bool {
 	if err != nil {
-		logf(DEBUG, "ERROR Update_Cache caller err='%v'", err)
+		log.Printf("ERROR Update_Cache caller err='%v'", err)
 		return false
 	}
 	if newmap == nil {
-		logf(DEBUG, "IGNORE Update_Cache newmap=nil")
+		//logf(DEBUG, "IGNORE Update_Cache newmap=nil")
 		return false
 	}
 	now := UnixTimeSec()
@@ -597,7 +596,7 @@ func (ac *AUTH_CACHE) Update_Cache(DEBUG bool, newmap map[string]USER_DATA, err 
 		ac.mux.Unlock()
 		return false
 	}
-	logf(DEBUG, "Update_Cache OK")
+	log.Printf("Update_Cache OK")
 	ac.last, ac.data = now, newmap
 	ac.mux.Unlock()
 	return true
