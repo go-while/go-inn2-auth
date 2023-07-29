@@ -1,11 +1,4 @@
-{
-  "Settings": {
-    "Max_Workers": 2,
-    "STDIN_TIMEOUT": 5,
-    "Debug": true,
-    "Debug_Daemon": true,
-    "Debug_CLI": false,
-    "Daemon_Host": "localhost:61119",
+/*
     "Daemon_TCP": "tcp",	//	default=tcp [tcp4|tcp6]
     "Daemon_Socket": "", 	// TODO: '/tmp/auth.socket' or empty
     "Daemon_Chmod": 600,	// TODO: 600, 660 or 666 for socket
@@ -16,11 +9,28 @@
     "Logs_File": "/path/filename.log",	// TODO: logs to file
     // sudo cp /etc/lets-encrypt/live/www.domain.com/*.pem /var/lib/news/
     // sudo chown news:news /var/lib/news/*.pem
-    "SSL_CRT": "/var/lib/news/fullchain.pem",	//	ssl certificate
-    "SSL_KEY": "/var/lib/news/privkey.pem",	//	ssl private-key
-  }
+*/
+{
+  "Settings": {
+    "Max_Workers": 2,
+    "STDIN_TIMEOUT": 5,
+    "Debug": true,
+    "Debug_Daemon": true,
+    "Debug_CLI": false,
+    "Daemon_Host": "localhost:61119",
+    "Daemon_TCP": "tcp",
+    "Daemon_Socket": "",
+    "Daemon_Chmod": 600,
+    "Auth_Mode": "json",
+    "Pass_Mode": "plain",
+    "USER_Len_Min": 4,
+    "PASS_Len_Min": 4,
+    "Logs_File": "/path/filename.log",
+    "SSL_CRT": "/var/lib/news/fullchain.pem",
+    "SSL_KEY": "/var/lib/news/privkey.pem"
+  },
   "Json_Auth": {
-      "User_File": "user.json" // set your own filename
+      "User_File": "user.json"
   },
   "Mongo_Auth": {
       "Mongo_Host": "",
