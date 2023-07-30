@@ -169,8 +169,6 @@ func main() {
 	var DEBUG_CLI bool
 	var boot_daemon bool
 	var conf_file string
-	var maxworkers int = 1
-
 	/*
 		var user_add	string
 		var user_del	string
@@ -190,16 +188,20 @@ func main() {
 	flag.Parse()
 
 	cfg := ReadConfig(DEBUG, conf_file)
-	if cfg.Settings.Max_Workers > 1 {
-		maxworkers = cfg.Settings.Max_Workers
+	if cfg.Settings.Max_Workers <= 0 {
+		cfg.Settings.Max_Workers = 1
 	}
+
 	DEBUG = cfg.Settings.Debug
 	DEBUG_CLI = cfg.Settings.Debug_CLI
 	DEBUG_DAEMON = cfg.Settings.Debug_Daemon
+
 	use_ssl := false
-	if cfg.Settings.SSL_CRT != "" && cfg.Settings.SSL_KEY != "" {
+	if cfg.Settings.SSL_CRT != "" && cfg.Settings.SSL_CRT[0] != '!' &&
+		cfg.Settings.SSL_KEY != "" && cfg.Settings.SSL_KEY[0] != '!' {
 		use_ssl = true
 	}
+
 	var timeout <-chan time.Time
 	if !boot_daemon {
 		go ReadStdin(DEBUG_CLI, cfg, use_ssl)
@@ -220,9 +222,9 @@ func main() {
 		default:
 			log.Fatal("ERROR main: unknown Auth_Mode")
 		} // end switch
-		REQUEST_CHAN = make(chan INN2_STDIN, maxworkers)
-		//done_daemons = make(chan struct{}, maxworkers)
-		for wid := 1; wid <= maxworkers; wid++ {
+		REQUEST_CHAN = make(chan INN2_STDIN, cfg.Settings.Max_Workers)
+		//done_daemons = make(chan struct{}, cfg.Settings.Max_Workers)
+		for wid := 1; wid <= cfg.Settings.Max_Workers; wid++ {
 			go Daemon(DEBUG_DAEMON, wid, cfg)
 			time.Sleep(time.Second / 1000)
 		}
